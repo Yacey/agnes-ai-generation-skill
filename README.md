@@ -120,7 +120,7 @@ python scripts/agnes_api.py image --prompt "Turn the scene into a rainy cyberpun
 python scripts/agnes_api.py video --prompt "A cinematic shot of a cat walking on the beach at sunset" --poll
 ```
 
-视频命令默认使用 `--num-frames 121 --frame-rate 24`，以减少缺少关键视频参数导致的不稳定。脚本会在请求前检查 `num_frames` 是否满足 `8n + 1` 且不超过 `441`，并检查帧率、尺寸等基础参数。
+视频命令默认使用 `--num-frames 121 --frame-rate 24 --interval 5`，以减少缺少关键视频参数导致的不稳定，并按官方推荐的 5 秒间隔轮询。脚本会在请求前检查 `num_frames` 是否满足 `8n + 1` 且不超过 `441`，并检查帧率、尺寸等基础参数。创建视频任务后会同时返回 `video_id`（推荐）与 `task_id`（兼容），优先使用 `video_id` 走 `/agnesapi` 端点可明显降低排队时间。
 
 图生视频：
 
@@ -134,7 +134,13 @@ python scripts/agnes_api.py video --prompt "Animate subtle camera movement and n
 python scripts/agnes_api.py video --prompt "Create a smooth cinematic transition between the two keyframes" --image https://example.com/a.png --image https://example.com/b.png --mode keyframes --poll
 ```
 
-查询视频任务：
+查询视频结果（推荐：使用创建任务返回的 `video_id`，走 `/agnesapi` 以缩短排队时间）：
+
+```powershell
+python scripts/agnes_api.py video-get --video-id video_xxxxxx
+```
+
+使用旧的 `task_id` 查询仍可用，作为兼容方式（排队可能较慢）：
 
 ```powershell
 python scripts/agnes_api.py video-get task_123456
