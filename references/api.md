@@ -57,11 +57,15 @@ For non-English user prompts, translate to English before sending the request. P
 
 Create task endpoint: `POST /v1/videos`
 
-Retrieve task endpoint: `GET /v1/videos/{task_id}`
+Retrieve video result (**recommended**): `GET /agnesapi?video_id=<VIDEO_ID>[&model_name=agnes-video-v2.0]`
+
+Retrieve task (legacy, kept for compatibility): `GET /v1/videos/{task_id}`
 
 Model: `agnes-video-v2.0`
 
-The video API is asynchronous. Create a task, then retrieve or poll by task id.
+The video API is asynchronous. Create a task first, then poll or retrieve using the returned `video_id` with `/agnesapi` to avoid long queuing. The create response also returns `task_id` / `id`, which can still be used with `/v1/videos/{task_id}` but is more likely to queue for longer than 5 minutes (if a task takes longer than ~5 minutes, the caller is probably using the task_id endpoint by mistake).
+
+Polling interval recommendation: 5 seconds.
 
 Use English prompts for video generation whenever possible. If the user prompt is not English, translate it to English first, preserving subject, action, scene, camera movement, lighting, style, and constraints.
 
@@ -84,6 +88,12 @@ Optional:
 - `extra_body.image`: array for multi-image video or keyframe mode
 - `extra_body.mode`: set to `keyframes` for keyframe animation
 
+Create-task response fields:
+
+- `id` / `task_id`: legacy task id
+- `video_id`: recommended id for `/agnesapi`
+- `object`, `model`, `status`, `progress`, `created_at`, `seconds`, `size`
+
 Common status values:
 
 - `queued`
@@ -98,6 +108,12 @@ Recommended video defaults:
 - Standard: `width=1152`, `height=768`, `num_frames=121`, `frame_rate=24`
 - Short smoke test: `num_frames=81`, `frame_rate=24`
 - Reproducibility: set `seed`
+
+Query usage reminder:
+
+- Prefer `GET /agnesapi?video_id=<VIDEO_ID>&model_name=agnes-video-v2.0` for new work.
+- `GET /v1/videos/{task_id}` remains available for backward compatibility, but queuing can be much slower.
+- If a task queues longer than ~5 minutes, double-check that the caller is using `video_id` with `/agnesapi`.
 
 ## Error Codes
 

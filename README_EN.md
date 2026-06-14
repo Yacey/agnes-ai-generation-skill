@@ -110,7 +110,7 @@ Text-to-video:
 python scripts/agnes_api.py video --prompt "A cinematic shot of a cat walking on the beach at sunset" --poll
 ```
 
-Video commands default to `--num-frames 121 --frame-rate 24` to reduce instability from missing core video parameters. The script validates `num_frames` before sending requests: it must satisfy `8n + 1` and be no more than `441`. It also checks frame rate and dimensions.
+Video commands default to `--num-frames 121 --frame-rate 24 --interval 5` to reduce instability from missing core video parameters and to match the officially recommended 5-second polling cadence. The script validates `num_frames` before sending requests: it must satisfy `8n + 1` and be no more than `441`. It also checks frame rate and dimensions. Creating a video task returns both a recommended `video_id` (for the `/agnesapi` endpoint with faster queuing) and a legacy `task_id`; the script prefers `video_id` when available and falls back to `task_id` otherwise.
 
 Image-to-video:
 
@@ -124,7 +124,13 @@ Multi-image / keyframe video:
 python scripts/agnes_api.py video --prompt "Create a smooth cinematic transition between the two keyframes" --image https://example.com/a.png --image https://example.com/b.png --mode keyframes --poll
 ```
 
-Retrieve a video task:
+Retrieve a video result (**recommended**): use the `video_id` returned by the create task, which routes through `/agnesapi` for faster queuing:
+
+```powershell
+python scripts/agnes_api.py video-get --video-id video_xxxxxx
+```
+
+Legacy retrieval with a task id (kept for compatibility; slower queuing):
 
 ```powershell
 python scripts/agnes_api.py video-get task_123456
