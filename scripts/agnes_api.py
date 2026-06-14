@@ -10,6 +10,7 @@ import re
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from typing import Any
 
@@ -330,31 +331,77 @@ def video_payload(args: argparse.Namespace) -> dict[str, Any]:
     return payload
 
 
-def poll_video(task_id: str, timeout: int, interval: int) -> dict[str, Any]:
+def pick_video_id(created: dict[str, Any]) -> tuple[str | None, str | None]:
+    video_id = created.get("video_id")
+    task_id = created.get("id") or created.get("task_id")
+    if isinstance(video_id, str) and video_id:
+        return video_id, str(task_id) if task_id else None
+    return None, str(task_id) if task_id else None
+
+
+def video_lookup_path(video_id: str | None, task_id: str | None) -> tuple[str, str]:
+    if isinstance(video_id, str) and video_id:
+        return (
+            f"/agnesapi?video_id={urllib.parse.quote(video_id, safe='')}"
+            f"&model_name={urllib.parse.quote(VIDEO_MODEL, safe='')}",
+            "video_id",
+        )
+    if not task_id:
+        raise SystemExit("Cannot retrieve video: neither video_id nor task_id available.")
+    print(
+        f"video {task_id}: no video_id available; falling back to /v1/videos/{{task_id}}. "
+        "Queuing may be slower; prefer using video_id with /agnesapi for new tasks.",
+        file=sys.stderr,
+    )
+    return f"/v1/videos/{urllib.parse.quote(task_id, safe='')}", "task_id"
+
+
+def poll_video(
+    task_id: str | None,
+    timeout: int,
+    interval: int,
+    *,
+    video_id: str | None = None,
+) -> dict[str, Any]:
+    path, key = video_lookup_path(video_id, task_id)
+    display_id = video_id if video_id else task_id
     deadline = time.time() + timeout
     last: dict[str, Any] = {}
     while time.time() < deadline:
-        last = request_json("GET", f"/v1/videos/{task_id}")
+        last = request_json("GET", path)
         if last.get("error"):
-            raise SystemExit(f"Video task {task_id} returned error: {json.dumps(last, ensure_ascii=False)}")
+            raise SystemExit(
+                f"Video {key}={display_id} returned error: {json.dumps(last, ensure_ascii=False)}"
+            )
         status = str(last.get("status", "")).lower()
         progress = last.get("progress")
         if status:
-            print(f"video {task_id}: status={status} progress={progress}", file=sys.stderr)
+            print(
+                f"video {key}={display_id} endpoint={path.split('?', 1)[0]} status={status} progress={progress}",
+                file=sys.stderr,
+            )
         if status in {"completed", "failed"}:
             return last
         time.sleep(interval)
-    raise SystemExit(f"Timed out waiting for video task {task_id}. Last response: {json.dumps(last)}")
+    raise SystemExit(
+        f"Timed out waiting for video {key}={display_id}. Last response: {json.dumps(last)}"
+    )
 
 
 def cmd_video(args: argparse.Namespace) -> None:
     created = request_json("POST", "/v1/videos", video_payload(args))
+    new_video_id, new_task_id = pick_video_id(created)
     if not args.poll:
-        task_id = created.get("id")
-        next_steps = []
-        if task_id:
-            next_steps.append(f"python scripts/agnes_api.py video-get {task_id}")
-            next_steps.append(f"python scripts/agnes_api.py video-get {task_id}  # repeat until status is completed")
+        next_steps: list[str] = []
+        if new_video_id:
+            next_steps.append(f"python scripts/agnes_api.py video-get --video-id {new_video_id}")
+            next_steps.append(
+                f"python scripts/agnes_api.py video-get --video-id {new_video_id}  "
+                "# repeat until status is completed"
+            )
+        elif new_task_id:
+            next_steps.append(f"python scripts/agnes_api.py video-get {new_task_id}")
+            next_steps.append(f"python scripts/agnes_api.py video-get {new_task_id}  # repeat until status is completed")
         output_result(
             "video-task",
             created,
@@ -365,10 +412,9 @@ def cmd_video(args: argparse.Namespace) -> None:
             raw_only=args.raw,
         )
         return
-    task_id = created.get("id")
-    if not task_id:
-        raise SystemExit(f"Video create response did not include id: {json.dumps(created)}")
-    data = poll_video(str(task_id), args.timeout, args.interval)
+    if not new_video_id and not new_task_id:
+        raise SystemExit(f"Video create response missing both video_id and task_id: {json.dumps(created)}")
+    data = poll_video(new_task_id, args.timeout, args.interval, video_id=new_video_id)
     urls = extract_video_urls(data)
     output_result(
         "video-result",
@@ -382,18 +428,34 @@ def cmd_video(args: argparse.Namespace) -> None:
 
 
 def cmd_video_get(args: argparse.Namespace) -> None:
-    data = request_json("GET", f"/v1/videos/{args.task_id}")
+    video_id = args.video_id
+    positional = getattr(args, "task_id", None)
+    task_id: str | None = None
+    if not video_id and positional:
+        if isinstance(positional, str) and positional.startswith("video_"):
+            video_id = positional
+        else:
+            task_id = positional
+    path, key = video_lookup_path(video_id, task_id)
+    display_id = video_id if video_id else task_id
+    data = request_json("GET", path)
     urls = extract_video_urls(data)
+    next_steps: list[str] = []
+    if not urls:
+        if video_id:
+            next_steps.append(f"python scripts/agnes_api.py video-get --video-id {video_id}")
+        elif task_id:
+            next_steps.append(f"python scripts/agnes_api.py video-get {task_id}")
     output_result(
         "video-result",
         data,
         urls=urls,
         status=str(data.get("status", "")) if data.get("status") is not None else None,
-        next_steps=[] if urls else [f"python scripts/agnes_api.py video-get {args.task_id}"],
+        next_steps=next_steps,
         raw_only=args.raw,
     )
     if data.get("error"):
-        raise SystemExit(1)
+        raise SystemExit(f"Video {key}={display_id} returned error: {json.dumps(data, ensure_ascii=False)}")
 
 
 def require_ok(name: str, data: dict[str, Any], keys: tuple[str, ...]) -> None:
@@ -440,12 +502,12 @@ def extract_image_url(data: dict[str, Any]) -> str:
 def create_video_case(name: str, payload: dict[str, Any], args: argparse.Namespace) -> dict[str, Any]:
     created = request_json("POST", "/v1/videos", payload)
     require_video_ok(f"{name}-create", created)
-    task_id = str(created["id"])
-    retrieved = (
-        poll_video(task_id, args.video_timeout, args.video_interval)
-        if args.poll_video
-        else request_json("GET", f"/v1/videos/{task_id}")
-    )
+    video_id, task_id = pick_video_id(created)
+    if args.poll_video:
+        retrieved = poll_video(task_id, args.video_timeout, args.video_interval, video_id=video_id)
+    else:
+        lookup_path, _ = video_lookup_path(video_id, task_id)
+        retrieved = request_json("GET", lookup_path)
     require_video_ok(f"{name}-get", retrieved, completed=args.poll_video)
     return {"create": created, "get": retrieved}
 
@@ -661,12 +723,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
     video.add_argument("--poll", action="store_true")
     video.add_argument("--timeout", type=int, default=900)
-    video.add_argument("--interval", type=int, default=10)
+    video.add_argument("--interval", type=int, default=5)
     video.add_argument("--raw", action="store_true", help="Print the raw provider response.")
     video.set_defaults(func=cmd_video)
 
     video_get = sub.add_parser("video-get", help="Retrieve a video task.")
-    video_get.add_argument("task_id")
+    video_get.add_argument("task_id", nargs="?", default=None, help="task_id for legacy lookup. Omit if --video-id is used.")
+    video_get.add_argument(
+        "--video-id",
+        help="Recommended: video_id returned from POST /v1/videos. Uses /agnesapi for faster queuing.",
+    )
     video_get.add_argument("--raw", action="store_true", help="Print the raw provider response.")
     video_get.set_defaults(func=cmd_video_get)
 
@@ -680,7 +746,7 @@ def build_parser() -> argparse.ArgumentParser:
     smoke.add_argument("--strict-tools", action="store_true", help="Fail if the tool-calling response has no tool_calls.")
     smoke.add_argument("--poll-video", action="store_true")
     smoke.add_argument("--video-timeout", type=int, default=900)
-    smoke.add_argument("--video-interval", type=int, default=10)
+    smoke.add_argument("--video-interval", type=int, default=5)
     smoke.add_argument(
         "--video-case",
         action="append",

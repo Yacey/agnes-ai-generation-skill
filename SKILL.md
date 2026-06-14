@@ -42,7 +42,7 @@ Image-to-image:
 python scripts/agnes_api.py image --prompt "Turn the scene into a rainy cyberpunk night while preserving composition" --image https://example.com/input.png --size 1024x768
 ```
 
-Text-to-video with polling:
+Text-to-video with polling (uses the returned `video_id` and the recommended `/agnesapi` endpoint by default):
 
 ```bash
 python scripts/agnes_api.py video --prompt "A cinematic shot of a cat walking on the beach at sunset" --poll
@@ -60,10 +60,16 @@ Keyframe / multi-image video:
 python scripts/agnes_api.py video --prompt "Create a smooth cinematic transition between the two keyframes" --image https://example.com/a.png --image https://example.com/b.png --mode keyframes --poll
 ```
 
-Retrieve a video task:
+Retrieve a video result (**recommended**): use the `video_id` returned by the create task, which routes through `/agnesapi` for faster queuing:
 
 ```bash
-python scripts/agnes_api.py video-get task_123456
+python scripts/agnes_api.py video-get --video-id video_xxxxxx
+```
+
+Legacy retrieval with a task id (kept for compatibility; slower queuing):
+
+```bash
+python scripts/agnes_api.py video-get task_xxxxxx
 ```
 
 Light live smoke test:
@@ -90,9 +96,9 @@ python scripts/agnes_api.py smoke-test --video-case text-to-video
 - Prefer `agnes-image-2.1-flash` for text-to-image, image-to-image, and high-information-density image generation. High-density generation is prompt-driven; include subject hierarchy, environment, secondary details, lighting, composition, and quality requirements.
 - Prefer `agnes-video-v2.0` for text-to-video, image-to-video, multi-image video, keyframe animation, prompt-based motion and scene control, cinematic output, asynchronous task creation, polling-based result retrieval, and seed-based reproducibility.
 - For image and video generation, convert any non-English user prompt to a fluent English generation prompt before calling the image/video API. English prompts are more stable for Agnes video generation. Preserve concrete visual details, style, lighting, composition, motion, camera instructions, and constraints during translation.
-- For videos, remember the API is asynchronous: create a task first, then poll or retrieve by task id.
+- For videos, remember the API is asynchronous: create a task first, then poll or retrieve by `video_id`. Always use `/agnesapi?video_id=<VIDEO_ID>&model_name=agnes-video-v2.0` as the default retrieval endpoint; `/v1/videos/{task_id}` remains available for compatibility but queues much slower. If a task queues for longer than ~5 minutes, the caller is almost certainly using `task_id` instead of `video_id`.
 - The script validates image sizes, video frame counts, frame rates, and dimensions before sending requests. `num_frames` must be `8n + 1` and `<= 441`; `81` or `121` are good short values.
-- The video command defaults to `num_frames=121` and `frame_rate=24` for more stable generation. Video smoke tests default to `num_frames=81` and `frame_rate=24`.
+- The video command defaults to `num_frames=121`, `frame_rate=24`, and a 5-second polling interval (matches the official recommendation) for more stable generation. Video smoke tests default to `num_frames=81`, `frame_rate=24`, and a 5-second polling interval.
 - Warn the user before costly or long-running live video generation unless they explicitly asked to test or generate video.
 - Test video capabilities one at a time with `smoke-test --video-case <case>` to avoid creating many tasks at once. Supported cases are `text-to-video`, `image-to-video`, `multi-image`, and `keyframes`.
 
